@@ -24,6 +24,7 @@
 apply plugin: 'com.android.application'
 
 android {
+	namespace 'com.serenegiant.usbCameraTest'
 	compileSdkVersion versionCompiler
 	buildToolsVersion versionBuildTool
 
