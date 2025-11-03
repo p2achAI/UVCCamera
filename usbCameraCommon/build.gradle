@@ -24,9 +24,9 @@
 apply plugin: 'com.android.library'
 
 android {
-	namespace 'com.serenegiant.uvccamera'
+	namespace 'com.serenegiant.usbcameracommon'
     compileSdkVersion versionCompiler
-   	buildToolsVersion versionBuildTool
+//   	buildToolsVersion versionBuildTool
 
    	compileOptions {
    		sourceCompatibility javaSourceCompatibility
@@ -34,7 +34,7 @@ android {
    	}
 
     defaultConfig {
-        minSdkVersion 18
+        minSdkVersion 21
         targetSdkVersion versionTarget
 
     }

@@ -35,7 +35,6 @@ import android.widget.CompoundButton;
 import android.widget.ImageButton;
 import android.widget.Toast;
 import android.widget.ToggleButton;
-
 import com.serenegiant.common.BaseActivity;
 
 import com.serenegiant.usb.CameraDialog;
@@ -109,6 +108,12 @@ public final class MainActivity extends BaseActivity implements CameraDialog.Cam
 		mUSBMonitor = new USBMonitor(this, mOnDeviceConnectListener);
 		mCameraHandler = UVCCameraHandler.createHandler(this, mUVCCameraView,
 			2, PREVIEW_WIDTH, PREVIEW_HEIGHT, PREVIEW_MODE);
+
+		// 길게 누르면 AE 모드 변경
+		mCameraButton.setOnLongClickListener(v -> {
+			stepExposureMode();
+			return true;
+		});
 	}
 
 	@Override
@@ -167,8 +172,7 @@ public final class MainActivity extends BaseActivity implements CameraDialog.Cam
 	private final OnClickListener mOnClickListener = new OnClickListener() {
 		@Override
 		public void onClick(final View view) {
-			switch (view.getId()) {
-			case R.id.capture_button:
+			if (view.getId() == R.id.capture_button) {
 				if (mCameraHandler.isOpened()) {
 					if (checkPermissionWriteExternalStorage() && checkPermissionAudio()) {
 						if (!mCameraHandler.isRecording()) {
@@ -180,7 +184,6 @@ public final class MainActivity extends BaseActivity implements CameraDialog.Cam
 						}
 					}
 				}
-				break;
 			}
 		}
 	};
@@ -189,8 +192,7 @@ public final class MainActivity extends BaseActivity implements CameraDialog.Cam
 		= new CompoundButton.OnCheckedChangeListener() {
 		@Override
 		public void onCheckedChanged(final CompoundButton compoundButton, final boolean isChecked) {
-			switch (compoundButton.getId()) {
-			case R.id.camera_button:
+			if (compoundButton.getId() == R.id.camera_button) {
 				if (isChecked && !mCameraHandler.isOpened()) {
 					CameraDialog.showDialog(MainActivity.this);
 				} else {
@@ -198,7 +200,6 @@ public final class MainActivity extends BaseActivity implements CameraDialog.Cam
 					mCaptureButton.setVisibility(View.INVISIBLE);
 					setCameraButton(false);
 				}
-				break;
 			}
 		}
 	};
@@ -209,8 +210,7 @@ public final class MainActivity extends BaseActivity implements CameraDialog.Cam
 	private final OnLongClickListener mOnLongClickListener = new OnLongClickListener() {
 		@Override
 		public boolean onLongClick(final View view) {
-			switch (view.getId()) {
-			case R.id.camera_view:
+			if (view.getId() == R.id.camera_view) {
 				if (mCameraHandler.isOpened()) {
 					if (checkPermissionWriteExternalStorage()) {
 						mCameraHandler.captureStill();
@@ -279,7 +279,7 @@ public final class MainActivity extends BaseActivity implements CameraDialog.Cam
 			}
 		}
 		@Override
-		public void onDettach(final UsbDevice device) {
+		public void onDetach(final UsbDevice device) {
 			Toast.makeText(MainActivity.this, "USB_DEVICE_DETACHED", Toast.LENGTH_SHORT).show();
 		}
 
@@ -301,6 +301,34 @@ public final class MainActivity extends BaseActivity implements CameraDialog.Cam
 	public void onDialogResult(boolean canceled) {
 		if (canceled) {
 			setCameraButton(false);
+		}
+	}
+
+	private final Object mSync = new Object();
+	private int mExposure = 0;
+
+	private void stepExposureMode() {
+		synchronized (mSync) {
+			if (mUVCCamera == null) return;
+			try {
+				// ensure limits are fresh
+				mExposure = mUVCCamera.getExposure();
+				boolean cur = mUVCCamera.getAutoExposure();
+				boolean next = !cur;
+				mUVCCamera.setAutoExposure(next);
+				final boolean applied = mUVCCamera.getAutoExposure();
+				runOnUiThread(new Runnable() {
+					@Override
+					public void run() {
+						Toast.makeText(MainActivity.this,
+								"AE mode -> " + applied +
+										" (exposure " + mExposure + "~" + ")",
+								Toast.LENGTH_SHORT).show();
+					}
+				});
+			} catch (Throwable t) {
+				// ignore if not supported by device
+			}
 		}
 	}
 

@@ -175,8 +175,8 @@ public class UVCService extends BaseService {
 		}
 
 		@Override
-		public void onDettach(final UsbDevice device) {
-			if (DEBUG) Log.d(TAG, "OnDeviceConnectListener#onDettach:");
+		public void onDetach(final UsbDevice device) {
+			if (DEBUG) Log.d(TAG, "OnDeviceConnectListener#onDetach:");
 		}
 
 		@Override

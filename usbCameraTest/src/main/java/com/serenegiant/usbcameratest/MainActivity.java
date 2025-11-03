@@ -55,12 +55,22 @@ public final class MainActivity extends BaseActivity implements CameraDialog.Cam
 	private ImageButton mCameraButton;
 	private Surface mPreviewSurface;
 
+	// Exposure mode state (queried from camera)
+	private int mExposure = 0;
+
 	@Override
 	protected void onCreate(final Bundle savedInstanceState) {
 		super.onCreate(savedInstanceState);
 		setContentView(R.layout.activity_main);
 		mCameraButton = (ImageButton)findViewById(R.id.camera_button);
 		mCameraButton.setOnClickListener(mOnClickListener);
+		mCameraButton.setOnLongClickListener(new View.OnLongClickListener() {
+			@Override
+			public boolean onLongClick(View v) {
+				stepExposureMode();
+				return true;
+			}
+		});
 
 		mUVCCameraView = (SimpleUVCCameraTextureView)findViewById(R.id.UVCCameraTextureView1);
 		mUVCCameraView.setAspectRatio(UVCCamera.DEFAULT_PREVIEW_WIDTH / (float)UVCCamera.DEFAULT_PREVIEW_HEIGHT);
@@ -205,9 +215,26 @@ public final class MainActivity extends BaseActivity implements CameraDialog.Cam
 						camera.setPreviewDisplay(mPreviewSurface);
 //						camera.setFrameCallback(mIFrameCallback, UVCCamera.PIXEL_FORMAT_RGB565/*UVCCamera.PIXEL_FORMAT_NV21*/);
 						camera.startPreview();
+						try {
+							// Query exposure mode limits and current value
+							mExposure = camera.getExposure();
+							final boolean currentMode = camera.getAutoExposure();
+							runOnUiThread(new Runnable() {
+								@Override
+								public void run() {
+									Toast.makeText(MainActivity.this,
+											"AE mode cur=" + currentMode +
+													" (exposure=" + mExposure + ")",
+											Toast.LENGTH_SHORT).show();
+								}
+							});
+						} catch (Throwable t) {
+							// ignore if camera/model doesn't expose AE mode
+						}
 					}
 					synchronized (mSync) {
 						mUVCCamera = camera;
+						mUVCCamera.updateCameraParams();
 					}
 				}
 			}, 0);
@@ -220,7 +247,7 @@ public final class MainActivity extends BaseActivity implements CameraDialog.Cam
 		}
 
 		@Override
-		public void onDettach(final UsbDevice device) {
+		public void onDetach(final UsbDevice device) {
 			Toast.makeText(MainActivity.this, "USB_DEVICE_DETACHED", Toast.LENGTH_SHORT).show();
 		}
 
@@ -283,7 +310,7 @@ public final class MainActivity extends BaseActivity implements CameraDialog.Cam
 			mImageView.post(mUpdateImageTask);
 		}
 	};
-	
+
 	private final Runnable mUpdateImageTask = new Runnable() {
 		@Override
 		public void run() {
@@ -292,4 +319,50 @@ public final class MainActivity extends BaseActivity implements CameraDialog.Cam
 			}
 		}
 	}; */
+	// Show current exposure mode and limits (UI thread safe)
+	private void showExposureModeInfo() {
+		synchronized (mSync) {
+			if (mUVCCamera == null) return;
+			try {
+				mExposure = mUVCCamera.getExposure();
+				final boolean cur = mUVCCamera.getAutoExposure();
+				runOnUiThread(new Runnable() {
+					@Override
+					public void run() {
+						Toast.makeText(MainActivity.this,
+								"AE mode cur=" + cur +
+										" (exposure=" + mExposure + ")",
+								Toast.LENGTH_SHORT).show();
+					}
+				});
+			} catch (Throwable t) {
+				// ignore
+			}
+		}
+	}
+
+	// Cycle exposure mode to next supported value within [min, max]
+	private void stepExposureMode() {
+		synchronized (mSync) {
+			if (mUVCCamera == null) return;
+			try {
+				mExposure = mUVCCamera.getExposure();
+				boolean cur = mUVCCamera.getAutoExposure();
+				boolean next = !cur;
+				mUVCCamera.setAutoExposure(next);
+				final boolean applied = mUVCCamera.getAutoExposure();
+				runOnUiThread(new Runnable() {
+					@Override
+					public void run() {
+						Toast.makeText(MainActivity.this,
+								"AE mode -> " + applied +
+										" (exposure " + mExposure + ")",
+								Toast.LENGTH_SHORT).show();
+					}
+				});
+			} catch (Throwable t) {
+				// ignore if not supported by device
+			}
+		}
+	}
 }
