@@ -934,7 +934,7 @@ public class UVCCamera {
 		if (mNativePtr != 0) {
 			final float range = Math.abs(mExposureMax - mExposureMin);
 			if (range > 0) {
-				nativeSetExposure(mNativePtr, (int)(exposure/100.f * range) + mExposureMin);
+				nativeSetExposure(mNativePtr, Math.round(exposure / 100.f * range) + mExposureMin);
 			}
 		}
 	}
@@ -950,7 +950,9 @@ public class UVCCamera {
 			nativeUpdateExposureLimit(mNativePtr);
 			final float range = Math.abs(mExposureMax - mExposureMin);
 			if (range > 0) {
-				result = (int)((exposure_abs-mExposureMin)* 100.f/range);
+				result = Math.round((exposure_abs - mExposureMin) * 100.f / range);
+				if (result < 0) result = 0;
+				else if (result > 100) result = 100;
 			}
 		}
 		return result;
