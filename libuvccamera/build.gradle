@@ -49,6 +49,11 @@ android {
 		}
 	}
 
+	publishing {
+		singleVariant("release") {
+			withSourcesJar()
+		}
+	}
 	compileOptions {
 		sourceCompatibility JavaVersion.VERSION_11
 		targetCompatibility JavaVersion.VERSION_11
@@ -110,15 +115,37 @@ dependencies {
 	}
 }
 
-//afterEvaluate {
-//	publishing {
-//		publications {
-//			release {
-//				groupId = 'com.github.p2achAI'
-//				artifactId = 'UVCCamera'
-//				version = '1.0.1'
-//				from component.release
-//			}
-//		}
-//	}
-//}
+afterEvaluate {
+	publishing {
+		publications {
+			release(MavenPublication) {
+				from components.release
+				groupId = findProperty("p2achUvcGroup") ?: "ai.p2ach.camera"
+				artifactId = findProperty("p2achUvcArtifact") ?: "libuvccamera"
+				version = findProperty("p2achUvcVersion") ?: "1.1.1"
+
+				pom {
+					name = "UVCCamera"
+					description = "UVC camera library for Android"
+					url = "https://github.com/p2achAI/UVCCamera"
+				}
+			}
+		}
+		repositories {
+			maven {
+				name = "GitHubPackages"
+				url = uri("https://maven.pkg.github.com/p2achAI/UVCCamera")
+				credentials {
+					username = findProperty("gpr.user") as String ?: System.getenv("GPR_USER")
+					password = findProperty("gpr.token") as String ?: System.getenv("GPR_TOKEN")
+				}
+			}
+		}
+	}
+}
+
+
+// Publish only POM + AAR (disable Gradle Module Metadata) to reduce strict variant/attribute matching issues in consumers.
+tasks.withType(GenerateModuleMetadata).configureEach {
+	enabled = false
+}

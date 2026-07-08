@@ -50,6 +50,8 @@ public class UVCCamera {
 	public static final int DEFAULT_PREVIEW_MIN_FPS = 1;
 	public static final int DEFAULT_PREVIEW_MAX_FPS = 30;
 	public static final float DEFAULT_BANDWIDTH = 1.0f;
+	public static final String P2ACH_ARTIFACT = "ai.p2ach.camera:libuvccamera";
+	public static final String P2ACH_VERSION = "1.1.1";
 
 	public static final int FRAME_FORMAT_YUYV = 0;
 	public static final int FRAME_FORMAT_MJPEG = 1;
@@ -131,6 +133,7 @@ public class UVCCamera {
 	protected int mCurrentWidth = DEFAULT_PREVIEW_WIDTH, mCurrentHeight = DEFAULT_PREVIEW_HEIGHT;
 	protected float mCurrentBandwidthFactor = DEFAULT_BANDWIDTH;
     protected String mSupportedSize;
+	protected String mDescriptions;
     protected List<Size> mCurrentSizeList;
 	// these fields from here are accessed from native code and do not change name and remove
     protected long mNativePtr;
@@ -205,6 +208,7 @@ public class UVCCamera {
 		}
     	if (mNativePtr != 0 && TextUtils.isEmpty(mSupportedSize)) {
     		mSupportedSize = nativeGetSupportedSize(mNativePtr);
+			mDescriptions = nativeGetDescriptions(mNativePtr);
     	}
 		nativeSetPreviewSize(mNativePtr, DEFAULT_PREVIEW_WIDTH, DEFAULT_PREVIEW_HEIGHT,
 			DEFAULT_PREVIEW_MIN_FPS, DEFAULT_PREVIEW_MAX_FPS, DEFAULT_PREVIEW_MODE, DEFAULT_BANDWIDTH);
@@ -266,6 +270,10 @@ public class UVCCamera {
 	public synchronized String getSupportedSize() {
     	return !TextUtils.isEmpty(mSupportedSize) ? mSupportedSize : (mSupportedSize = nativeGetSupportedSize(mNativePtr));
     }
+
+	public synchronized String getDescriptions() {
+		return !TextUtils.isEmpty(mDescriptions) ? mDescriptions : (mDescriptions = nativeGetDescriptions(mNativePtr));
+	}
 
 	public Size getPreviewSize() {
 		Size result = null;
@@ -335,11 +343,24 @@ public class UVCCamera {
 
 	public List<Size> getSupportedSizeList() {
 		final int type = (mCurrentFrameFormat > 0) ? 6 : 4;
-		return getSupportedSize(type, mSupportedSize);
+		return getSupportedSize(type, mSupportedSize, mDescriptions);
 	}
 
 	public static List<Size> getSupportedSize(final int type, final String supportedSize) {
+		return getSupportedSize(type, supportedSize, null);
+	}
+
+	/**
+	 * Build Size list from nativeGetSupportedSize JSON, and enrich it with per-size FPS/intervals from nativeGetDescriptions JSON.
+	 *
+	 * supportedSize: {"formats":[{"type":6,"size":["1920x1080", ...]}, ...]}
+	 * descriptions: JSON dump that includes frameDescriptors[].intervals[].value (100ns units)
+	 */
+	public static List<Size> getSupportedSize(final int type, final String supportedSize, final String descriptions) {
 		final List<Size> result = new ArrayList<Size>();
+		// Map: key = "<formatType>:<w>x<h>", value = intervals[] (100ns)
+		final java.util.HashMap<String, int[]> intervalMap = buildIntervalMapFromDescriptions(descriptions);
+
 		if (!TextUtils.isEmpty(supportedSize)) {
 			try {
 				final JSONObject json = new JSONObject(supportedSize);
@@ -350,28 +371,102 @@ public class UVCCamera {
 					if (format.has("type") && format.has("size")) {
 						final int format_type = format.getInt("type");
 						if ((format_type == type) || (type == -1)) {
-							addSize(format, format_type, 0, result);
+							addSize(format, format_type, 0, intervalMap, result);
 						}
 					}
 				}
 			} catch (final JSONException e) {
-				e.printStackTrace();
+				e.fillInStackTrace();
 			}
 		}
 		return result;
 	}
 
-	private static final void addSize(final JSONObject format, final int formatType, final int frameType, final List<Size> size_list) throws JSONException {
+	private static final void addSize(final JSONObject format, final int formatType, final int frameType,
+			final java.util.HashMap<String, int[]> intervalMap,
+			final List<Size> size_list) throws JSONException {
 		final JSONArray size = format.getJSONArray("size");
 		final int size_nums = size.length();
 		for (int j = 0; j < size_nums; j++) {
 			final String[] sz = size.getString(j).split("x");
 			try {
-				size_list.add(new Size(formatType, frameType, j, Integer.parseInt(sz[0]), Integer.parseInt(sz[1])));
+				final int w = Integer.parseInt(sz[0]);
+				final int h = Integer.parseInt(sz[1]);
+				final String key = buildIntervalKey(formatType, w, h);
+				final int[] intervals = (intervalMap != null) ? intervalMap.get(key) : null;
+				if (intervals != null && intervals.length > 0) {
+					size_list.add(new Size(formatType, frameType, j, w, h, intervals));
+				} else {
+					size_list.add(new Size(formatType, frameType, j, w, h));
+				}
 			} catch (final Exception e) {
 				break;
 			}
 		}
+	}
+
+	private static String buildIntervalKey(final int formatType, final int width, final int height) {
+		return formatType + ":" + width + "x" + height;
+	}
+
+	/**
+	 * Parse nativeGetDescriptions JSON and extract frame intervals (100ns units) per (formatType,width,height).
+	 * Expected shape (example):
+	 * description.uvc.interfaces[].formats[].subType, formats[].detail.frameDescriptors[].{width,height,intervals[].value}
+	 */
+	private static java.util.HashMap<String, int[]> buildIntervalMapFromDescriptions(final String descriptions) {
+		final java.util.HashMap<String, int[]> map = new java.util.HashMap<>();
+		if (TextUtils.isEmpty(descriptions)) return map;
+		try {
+			final JSONObject root = new JSONObject(descriptions);
+			if (!root.has("description")) return map;
+			final JSONObject desc = root.getJSONObject("description");
+			if (!desc.has("uvc")) return map;
+			final JSONObject uvc = desc.getJSONObject("uvc");
+			if (!uvc.has("interfaces")) return map;
+			final JSONArray ifaces = uvc.getJSONArray("interfaces");
+			for (int i = 0; i < ifaces.length(); i++) {
+				final JSONObject iface = ifaces.getJSONObject(i);
+				if (!iface.has("formats")) continue;
+				final JSONArray formats = iface.getJSONArray("formats");
+				for (int f = 0; f < formats.length(); f++) {
+					final JSONObject fmt = formats.getJSONObject(f);
+					if (!fmt.has("subType") || !fmt.has("detail")) continue;
+					final int subType = fmt.getInt("subType");
+					final JSONObject detail = fmt.getJSONObject("detail");
+					if (!detail.has("frameDescriptors")) continue;
+					final JSONArray frames = detail.getJSONArray("frameDescriptors");
+					for (int k = 0; k < frames.length(); k++) {
+						final JSONObject frame = frames.getJSONObject(k);
+						if (!frame.has("width") || !frame.has("height")) continue;
+						final int w = frame.getInt("width");
+						final int h = frame.getInt("height");
+						if (!frame.has("intervals")) continue;
+						final JSONArray intervalsArr = frame.getJSONArray("intervals");
+						final int n = intervalsArr.length();
+						if (n <= 0) continue;
+						final int[] intervals = new int[n];
+						for (int t = 0; t < n; t++) {
+							final JSONObject it = intervalsArr.getJSONObject(t);
+							intervals[t] = it.has("value") ? it.getInt("value") : 0;
+						}
+						// Filter zeros
+						int count = 0;
+						for (int v : intervals) if (v > 0) count++;
+						if (count <= 0) continue;
+						final int[] cleaned = (count == intervals.length) ? intervals : new int[count];
+						if (cleaned != intervals) {
+							int idx = 0;
+							for (int v : intervals) if (v > 0) cleaned[idx++] = v;
+						}
+						map.put(buildIntervalKey(subType, w, h), cleaned);
+					}
+				}
+			}
+		} catch (final Exception e) {
+			// Ignore parse errors; fallback to size-only list
+		}
+		return map;
 	}
 
     /**
@@ -1169,6 +1264,7 @@ public class UVCCamera {
 
     private static final native int nativeSetPreviewSize(final long id_camera, final int width, final int height, final int min_fps, final int max_fps, final int mode, final float bandwidth);
     private static final native String nativeGetSupportedSize(final long id_camera);
+	private static final native String nativeGetDescriptions(final long id_camera);
     private static final native int nativeStartPreview(final long id_camera);
     private static final native int nativeStopPreview(final long id_camera);
     private static final native int nativeSetPreviewDisplay(final long id_camera, final Surface surface);

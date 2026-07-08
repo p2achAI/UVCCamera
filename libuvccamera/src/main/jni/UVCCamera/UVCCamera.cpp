@@ -237,6 +237,15 @@ int UVCCamera::setButtonCallback(JNIEnv *env, jobject button_callback_obj) {
 	RETURN(result, int);
 }
 
+char *UVCCamera::getDescriptions() {
+    ENTER();
+    if (mDeviceHandle) {
+        UVCDiags params;
+        RETURN(params.getDescriptions(mDeviceHandle), char *)
+    }
+    RETURN(NULL, char *);
+}
+
 char *UVCCamera::getSupportedSize() {
 	ENTER();
 	if (mDeviceHandle) {
